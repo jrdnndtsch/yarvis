@@ -33,6 +33,7 @@ import {
   type SurfaceState,
   stateAfterCloseTab,
   stateAfterOpenEditor,
+  stateAfterRenameTab,
   type Tab,
   type TerminalTab,
   uid,
@@ -448,6 +449,10 @@ export default function TerminalTabs({
     });
   }, []);
 
+  const renameTab = useCallback((tabId: string, title: string) => {
+    setState((prev) => stateAfterRenameTab(prev, tabId, title));
+  }, []);
+
   // Closing a pinned tab ends its underlying session; the caller stops listing it
   // on its next poll, which removes the header.
   // Closing a pinned tab ends its underlying session and tells the owner, which
@@ -619,6 +624,7 @@ export default function TerminalTabs({
         onClosePinned={(p) => void closePinned(p)}
         onNew={openTab}
         onReorder={reorder}
+        onRename={renameTab}
       />
       <div className="min-h-0 min-w-0 flex-1">
         {activePinned ? (
@@ -677,6 +683,7 @@ function TabStrip({
   onClosePinned,
   onNew,
   onReorder,
+  onRename,
 }: {
   tabs: Tab[];
   pinnedTabs: PinnedTab[];
@@ -691,7 +698,11 @@ function TabStrip({
   onClosePinned: (pinned: PinnedTab) => void;
   onNew: () => void;
   onReorder: (dragId: string, targetId: string, position: "before" | "after") => void;
+  onRename: (id: string, title: string) => void;
 }) {
+  /** The terminal tab whose name is being edited in place. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   // The active drag: which tab is being dragged, which tab the cursor is over,
   // and which side of that tab the drop would land on. Bundled so the three
   // fields always clear together on drop / drag end / drag leave.
@@ -796,11 +807,13 @@ function TabStrip({
           const isOver = drag?.overId === t.id && drag.dragId !== t.id;
           const showBefore = isOver && drag?.side === "before";
           const showAfter = isOver && drag?.side === "after";
+          const editing = editingId === t.id && t.kind === "terminal";
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: drag handlers on wrapper; the inner buttons still own click/keyboard activation.
             <div
               key={t.id}
-              draggable
+              // Off while editing, so selecting text in the field doesn't drag the tab.
+              draggable={!editing}
               onDragStart={(e) => onTabDragStart(e, t.id)}
               onDragOver={(e) => onTabDragOver(e, t.id)}
               onDrop={(e) => onTabDrop(e, t.id)}
@@ -825,41 +838,56 @@ function TabStrip({
                   className="pointer-events-none absolute inset-y-0 -right-0.5 w-0.5 bg-indigo-400"
                 />
               )}
-              <button
-                type="button"
-                onClick={() => onSelect(t.id)}
-                className="flex max-w-40 items-center gap-1 truncate"
-                title={
-                  t.kind === "diff" || t.kind === "editor"
-                    ? t.path
-                    : flagged
-                      ? `${t.title} — needs you`
-                      : t.title
-                }
-              >
-                {flagged && <span className="text-amber-400">●</span>}
-                {t.kind === "diff" && (
-                  <span className="text-sky-400" title="Diff view">
-                    ±
-                  </span>
-                )}
-                {/* One glyph either way, coloured when unsaved: an amber dot
+              {editing ? (
+                <TabTitleInput
+                  title={t.title}
+                  onDone={(title) => {
+                    if (title !== null) onRename(t.id, title);
+                    setEditingId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSelect(t.id)}
+                  onDoubleClick={() => {
+                    if (t.kind === "terminal") setEditingId(t.id);
+                  }}
+                  className="flex max-w-40 items-center gap-1 truncate"
+                  title={
+                    t.kind === "diff" || t.kind === "editor"
+                      ? t.path
+                      : flagged
+                        ? `${t.title} — needs you`
+                        : t.kind === "terminal"
+                          ? `${t.title} — double-click to rename`
+                          : t.title
+                  }
+                >
+                  {flagged && <span className="text-amber-400">●</span>}
+                  {t.kind === "diff" && (
+                    <span className="text-sky-400" title="Diff view">
+                      ±
+                    </span>
+                  )}
+                  {/* One glyph either way, coloured when unsaved: an amber dot
                     here would read as the attention marker above. */}
-                {t.kind === "editor" && (
-                  <span
-                    className={dirty ? "text-amber-400" : "text-zinc-500"}
-                    title={dirty ? "Unsaved changes" : undefined}
-                  >
-                    ✎
-                  </span>
-                )}
-                {t.kind === "setup" && (
-                  <span className="text-red-400" title="Setup log for a repo whose setup failed">
-                    ⚠
-                  </span>
-                )}
-                {t.title}
-              </button>
+                  {t.kind === "editor" && (
+                    <span
+                      className={dirty ? "text-amber-400" : "text-zinc-500"}
+                      title={dirty ? "Unsaved changes" : undefined}
+                    >
+                      ✎
+                    </span>
+                  )}
+                  {t.kind === "setup" && (
+                    <span className="text-red-400" title="Setup log for a repo whose setup failed">
+                      ⚠
+                    </span>
+                  )}
+                  {t.title}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onClose(t.id)}
@@ -883,6 +911,55 @@ function TabStrip({
         +
       </button>
     </div>
+  );
+}
+
+/**
+ * A tab's name, edited in place. Enter or clicking away keeps the edit and
+ * Escape drops it; `onDone` gets `null` for a dropped one, and fires once.
+ */
+function TabTitleInput({
+  title,
+  onDone,
+}: {
+  title: string;
+  onDone: (title: string | null) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const doneRef = useRef(false);
+  const finish = (value: string | null) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onDone(value);
+  };
+  // A frame late, so it lands after the double-click's own clicks, which each
+  // queue focus back to the tab's terminal.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return (
+    <input
+      ref={ref}
+      defaultValue={title}
+      aria-label="Tab name"
+      maxLength={60}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(e.currentTarget.value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          finish(null);
+        }
+      }}
+      onBlur={(e) => finish(e.currentTarget.value)}
+      className="w-32 rounded bg-zinc-800 px-1 text-xs text-zinc-100 outline-none ring-1 ring-indigo-400"
+    />
   );
 }
 

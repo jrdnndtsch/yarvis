@@ -14,6 +14,9 @@ top bar that lists sessions waiting on you; see
 
 - **New tab:** press **+** or Cmd+T. New tabs are named "Terminal 1",
   "Terminal 2", and so on.
+- **Rename:** double-click a tab's name, type, and press Enter (or click
+  away). Escape cancels. Diff, editor and setup-log tabs keep their file or
+  repo name.
 - **Reorder:** drag a tab along the strip.
 - **Close:** press × or Cmd+W. If a process is still running in any of the
   tab's panes, you're asked before it is killed.

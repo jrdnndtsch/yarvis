@@ -7,6 +7,7 @@ import {
   type SurfaceState,
   stateAfterCloseTab,
   stateAfterOpenEditor,
+  stateAfterRenameTab,
 } from "./surfaceState";
 
 /** A surface holding `count` terminal tabs, with the first one active. */
@@ -162,5 +163,32 @@ describe("stateAfterOpenEditor", () => {
     // Identity, not equality: a new object here re-fires the request effect that
     // asked for the tab, which asks for it again.
     expect(stateAfterOpenEditor(opened, FILE, "a.ts")).toBe(opened);
+  });
+});
+
+describe("stateAfterRenameTab", () => {
+  it("renames a terminal tab, trimmed", () => {
+    const next = stateAfterRenameTab(withTabs(2), "t1", "  api server ");
+    expect(next.tabs.map((t) => t.title)).toEqual(["Terminal 0", "api server"]);
+  });
+
+  it("keeps the old name for a blank one", () => {
+    const prev = withTabs(1);
+    expect(stateAfterRenameTab(prev, "t0", "   ")).toBe(prev);
+  });
+
+  it("leaves a diff tab named after its file", () => {
+    const prev: SurfaceState = {
+      tabs: [{ id: "d1", title: "a.ts", kind: "diff", repoId: "r1", path: "src/a.ts" }],
+      activeTabId: "d1",
+      focused: {},
+    };
+    expect(stateAfterRenameTab(prev, "d1", "other")).toBe(prev);
+  });
+
+  it("returns the same state for an unchanged name or unknown tab", () => {
+    const prev = withTabs(1);
+    expect(stateAfterRenameTab(prev, "t0", "Terminal 0")).toBe(prev);
+    expect(stateAfterRenameTab(prev, "nope", "x")).toBe(prev);
   });
 });

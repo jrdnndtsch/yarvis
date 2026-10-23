@@ -177,6 +177,27 @@ export function stateAfterOpenEditor(
 }
 
 /**
+ * The state after a tab is renamed. Only terminal tabs take a name — the others
+ * are named after the file or repo they show — and a blank one keeps the old
+ * name. Returns `prev` unchanged when nothing changes.
+ */
+export function stateAfterRenameTab(
+  prev: SurfaceState,
+  tabId: string,
+  title: string,
+): SurfaceState {
+  const name = title.trim();
+  if (!name) return prev;
+  let changed = false;
+  const tabs = prev.tabs.map((t) => {
+    if (t.id !== tabId || t.kind !== "terminal" || t.title === name) return t;
+    changed = true;
+    return { ...t, title: name };
+  });
+  return changed ? { ...prev, tabs } : prev;
+}
+
+/**
  * The state after a tab is removed. Closing the last one is the interesting
  * case: a surface that owns no default tab may sit empty — its pinned tab is the
  * point, and respawning a shell there is exactly the tab the user was trying to

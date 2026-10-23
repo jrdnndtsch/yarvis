@@ -155,3 +155,45 @@ describe("split pane dimming", () => {
     expect(dimmedPaneIds(host)).toEqual([]);
   });
 });
+
+describe("renaming a tab", () => {
+  const tabButton = (host: HTMLElement) =>
+    [...host.querySelectorAll("button")].find((b) => b.textContent === "Terminal");
+
+  async function startEditing(host: HTMLElement): Promise<HTMLInputElement> {
+    tabButton(host)?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await settle();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Tab name"]');
+    if (!input) throw new Error("no rename field");
+    return input;
+  }
+
+  const persistedTitle = () =>
+    (JSON.parse(localStorage.getItem(storageKeyFor(SURFACE_KEY)) ?? "{}") as SurfaceState).tabs?.[0]
+      ?.title;
+
+  it("keeps the new name on Enter, and persists it", async () => {
+    const host = await mountTabs(terminalTab(pane("pA"), "pA"));
+    const input = await startEditing(host);
+
+    input.value = "api server";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+
+    expect(host.querySelector('input[aria-label="Tab name"]')).toBeNull();
+    expect(host.textContent).toContain("api server");
+    expect(persistedTitle()).toBe("api server");
+  });
+
+  it("drops the edit on Escape", async () => {
+    const host = await mountTabs(terminalTab(pane("pA"), "pA"));
+    const input = await startEditing(host);
+
+    input.value = "api server";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+
+    expect(host.querySelector('input[aria-label="Tab name"]')).toBeNull();
+    expect(persistedTitle()).toBe("Terminal");
+  });
+});
