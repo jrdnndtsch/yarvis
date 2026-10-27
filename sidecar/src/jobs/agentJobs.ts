@@ -146,6 +146,9 @@ export async function getAgentJob(db: Db, id: string): Promise<AgentJob | null> 
 
 export async function createAgentJob(db: Db, input: AgentJobInput): Promise<AgentJob> {
   const [row] = await db.insert(scheduledJobs).values(toRow(input)).returning();
+  // `isCronDue` measures from the last start and treats "never" as now, so a job
+  // with no lease row would never come due.
+  await anchorSchedule(db, row.id);
   return toAgentJob(row);
 }
 

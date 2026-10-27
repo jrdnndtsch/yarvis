@@ -20,7 +20,9 @@ import {
   updateAgentJob,
 } from "./agentJobs.ts";
 import type { AgentJobRunner, RunnerSet } from "./runners.ts";
+import { isDue } from "./schedule.ts";
 import { runJob } from "./scheduler.ts";
+import { getJobRun } from "./store.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/yarvis_test";
 const sql = postgres(url, { max: 1 });
@@ -214,13 +216,29 @@ describe("what a run stores", () => {
   });
 });
 
+describe("creating a job", () => {
+  it("comes due at its first firing after it was saved, and not before", async () => {
+    const job = await createAgentJob(db, input({ cron: "0 9 * * *" }));
+    const def = toJobDefinition(job);
+    const lease = await getJobRun(db, jobSchedulerName(job.id));
+
+    const nextNine = new Date();
+    nextNine.setHours(9, 0, 0, 0);
+    if (nextNine.getTime() <= Date.now()) nextNine.setDate(nextNine.getDate() + 1);
+
+    expect(isDue(def.schedule, lease, new Date())).toBe(false);
+    expect(isDue(def.schedule, lease, new Date(nextNine.getTime() + 60_000))).toBe(true);
+  });
+});
+
 describe("editing a job", () => {
   it("re-anchors the schedule when a paused job is switched back on", async () => {
     const job = await createAgentJob(db, input({ enabled: false, cron: "0 9 * * *" }));
     // A month-old start would otherwise make the 09:00 firing overdue the
     // instant the job is re-enabled.
     await sql`insert into job_runs (name, last_started_at, updated_at)
-              values (${jobSchedulerName(job.id)}, now() - interval '30 days', now())`;
+              values (${jobSchedulerName(job.id)}, now() - interval '30 days', now())
+              on conflict (name) do update set last_started_at = excluded.last_started_at`;
 
     await updateAgentJob(db, job.id, input({ enabled: true, cron: "0 9 * * *" }));
 
@@ -232,7 +250,8 @@ describe("editing a job", () => {
   it("re-anchors when the schedule itself changes", async () => {
     const job = await createAgentJob(db, input());
     await sql`insert into job_runs (name, last_started_at, updated_at)
-              values (${jobSchedulerName(job.id)}, now() - interval '30 days', now())`;
+              values (${jobSchedulerName(job.id)}, now() - interval '30 days', now())
+              on conflict (name) do update set last_started_at = excluded.last_started_at`;
 
     await updateAgentJob(db, job.id, input({ cron: "0 18 * * *" }));
 
